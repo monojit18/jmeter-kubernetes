@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: influxdb-config
+  namespace: perftest
   labels:
     app: influxdb-jmeter
 data:

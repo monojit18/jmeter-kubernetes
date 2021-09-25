@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: jmeter-influxdb
+  namespace: perftest
   labels:
     app: influxdb-jmeter
 spec:

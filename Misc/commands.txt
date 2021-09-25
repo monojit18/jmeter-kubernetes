@@ -1,0 +1,86 @@
+tenantId=""
+subscriptionId=""
+aksResourceGroup="jmeter-workshop-rg"
+location="eastus"
+aksClusterName="jmeter-workshop-cluster"
+version="1.19.13"
+aksVnetName="jmeter-workshop-vnet"
+aksVnetPrefix=20.0.0.0/20
+aksVnetId=
+aksSubnetName=jmeter-aks-subnet
+aksSubnetPrefix=20.0.0.0/22
+aksSubnetId=
+sysNodeSize="Standard_DS2_v2"
+sysNodeCount=3
+maxSysPods=30
+networkPlugin=azure
+networkPolicy=azure
+sysNodePoolName=akssyspool
+jmtNodePoolName=aksjmtpool
+maxJMTPods=100
+jmtNodeCount=3
+jmtNodeSize="Standard_DS2_v2"
+vmSetType=VirtualMachineScaleSets
+addons=monitoring
+acrName="aksltacr"
+
+az ad sp create-for-rbac --skip-assignment -n http://$clusterName-sp
+{
+  "appId": "",
+  "displayName": "http://jmeter-workshop-cluster-sp",
+  "name": "",
+  "password": "",
+  "tenant": ""
+}
+
+spAppId=""
+spPassword=""
+
+az network vnet create -n $aksVnetName -g $aksResourceGroup --address-prefixes $aksVnetPrefix
+aksVnetId=$(az network vnet show -n $aksVnetName -g $aksResourceGroup --query="id" -o tsv)
+echo $aksVnetId
+
+az network vnet subnet create -n $aksSubnetName --vnet-name $aksVnetName -g $aksResourceGroup --address-prefixes $aksSubnetPrefix
+aksSubnetId=$(az network vnet subnet show -n $aksSubnetName --vnet-name $aksVnetName -g $aksResourceGroup --query="id" -o tsv)
+echo $aksSubnetId
+
+az role assignment create --assignee $spAppId --role "Network Contributor" --scope $aksVnetId
+
+az aks create --name $aksClusterName \
+--resource-group $aksResourceGroup \
+--kubernetes-version $version --location $location \
+--vnet-subnet-id "$aksSubnetId" --enable-addons $addons \
+--node-vm-size $sysNodeSize \
+--node-count $sysNodeCount --max-pods $maxSysPods \
+--service-principal $spAppId \
+--client-secret $spPassword \
+--network-plugin $networkPlugin --network-policy $networkPolicy \
+--nodepool-name $sysNodePoolName --vm-set-type $vmSetType \
+--generate-ssh-keys
+
+az aks get-credentials -g $aksResourceGroup --name $aksClusterName
+
+az aks nodepool add --cluster-name $aksClusterName -g $resourceGroup \
+--name $jmtNodePoolName --kubernetes-version $version --max-pods $maxJMTPods \
+--node-count $jmtNodeCount --node-vm-size $jmtNodeSize --os-type "Linux" --mode "User"
+
+az aks delete --name $aksClusterName --resource-group $resourceGroup --yes
+
+JMeter
+=======
+
+acrId=$(az acr show -n $acrName --query="id" -o tsv)
+az aks update -g $resourceGroup -n $aksClusterName --attach-acr $acrId
+
+# docker build --tag="kubernautslabs/jmeter-base:latest" -f Dockerfile-base .
+az acr build -t $acrName.azurecr.io/jmeter-base:latest -r $acrName -f Dockerfile-base .
+
+# docker build --tag="$acrName/jmeter-master:latest" -f Dockerfile-master .
+az acr build -t $acrName.azurecr.io/jmeter-master:latest -r $acrName -f Dockerfile-master .
+
+# docker build --tag="kubernautslabs/jmeter-slave:latest" -f Dockerfile-slave .
+az acr build -t $acrName.azurecr.io/jmeter-slave:latest -r $acrName -f Dockerfile-slave .
+
+# docker build --tag="kubernautslabs/jmeter-reporter" -f Dockerfile-reporter .
+az acr build -t $acrName.azurecr.io/jmeter-reporter:latest -r $acrName -f Dockerfile-reporter .
+
